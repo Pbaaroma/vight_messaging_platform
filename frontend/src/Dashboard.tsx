@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   MessageCircle,
   Users,
@@ -19,14 +19,30 @@ import {
 import './App.css'
 
 type Message = {
-  id: number
+  id: string
   text: string
   sender: 'me' | 'other'
   time: string
 }
+type DatabaseMessage = {
+  _id?: {
+    $oid?: string
+  }
+  sender: string
+  receiver: string
+  content: string
+  createdAt?: {
+    $date?: {
+      $numberLong?: string
+    }
+  }
+  created_at?: string
+  status?: string
+}
 
 type Conversation = {
   id: number
+  userId: string
   name: string
   initials: string
   color: string
@@ -37,83 +53,75 @@ type Conversation = {
 const initialConversations: Conversation[] = [
   {
     id: 1,
+    userId: 'client_b',
     name: 'Jonathan Mensah',
     initials: 'JM',
     color: '#2563eb',
     online: true,
-    messages: [
-      {
-        id: 1,
-        text: 'Hey! How is the VIGHT project going?',
-        sender: 'other',
-        time: '10:02 PM',
-      },
-      {
-        id: 2,
-        text: "It's going well! I'm building the messaging interface.",
-        sender: 'me',
-        time: '10:05 PM',
-      },
-      {
-        id: 3,
-        text: 'Nice! Did you get the Rust backend working?',
-        sender: 'other',
-        time: '10:07 PM',
-      },
-      {
-        id: 4,
-        text: 'Not yet. I am finishing the frontend first.',
-        sender: 'me',
-        time: '10:10 PM',
-      },
-    ],
+    messages: [  ],
   },
   {
     id: 2,
+    userId: 'client_c',
     name: 'Emmanuel Mensah',
     initials: 'EM',
     color: '#7c3aed',
     online: true,
-    messages: [
-      {
-        id: 1,
-        text: 'I just pushed the latest code.',
-        sender: 'other',
-        time: '9:47 PM',
-      },
-    ],
+    messages: [],
   },
   {
+    userId: 'client_d',
     id: 3,
     name: 'Gabriel Kofi',
     initials: 'GK',
     color: '#0891b2',
     online: true,
-    messages: [
-      {
-        id: 1,
-        text: "Let's meet at the library.",
-        sender: 'other',
-        time: '8:31 PM',
-      },
-    ],
+    messages: [],
   },
   {
+    userId: 'client_e',
     id: 4,
     name: 'Lawrence Annor',
     initials: 'LA',
     color: '#ea580c',
     online: false,
-    messages: [
-      {
-        id: 1,
-        text: 'The network results look good!',
-        sender: 'other',
-        time: '7:16 PM',
-      },
-    ],
+    messages: [],
   },
 ]
+
+const CURRENT_USER = 'client_a'
+
+function formatMessageTime(timestamp?: string) {
+  if (!timestamp) return ''
+
+  const date = new Date(timestamp)
+
+  if (Number.isNaN(date.getTime())) return ''
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function convertDatabaseMessage(
+  message: DatabaseMessage,
+): Message {
+  const mongoTimestamp =
+    message.createdAt?.$date?.$numberLong
+
+  const timestamp = mongoTimestamp
+    ? new Date(Number(mongoTimestamp)).toISOString()
+    : message.created_at
+
+  return {
+    id: message._id?.$oid ?? crypto.randomUUID(),
+    text: message.content,
+    sender: message.sender === CURRENT_USER ? 'me' : 'other',
+    time: formatMessageTime(timestamp),
+  }
+}
+
 
 function App() {
   const [conversations, setConversations] =
@@ -122,41 +130,174 @@ function App() {
   const [activeId, setActiveId] = useState(1)
   const [search, setSearch] = useState('')
   const [messageInput, setMessageInput] = useState('')
+  const websocketRef = useRef<WebSocket | null>(null)
+
+const [connectionStatus, setConnectionStatus] =
+  useState<'connecting' | 'connected' | 'disconnected'>('connecting')
 
   const navigate = useNavigate()
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeId,
   )
+useEffect(() => {
+  const protocol =
+    window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+
+  const socket = new WebSocket(
+    `${protocol}//${window.location.host}/ws`,
+  )
+
+  websocketRef.current = socket
+
+  socket.onopen = () => {
+    if (websocketRef.current !== socket) return
+
+    console.log('VIGHT WebSocket connected')
+    setConnectionStatus('connected')
+  }
+
+  socket.onmessage = (event) => {
+  if (websocketRef.current !== socket) return
+
+  try {
+    const message = JSON.parse(event.data) as DatabaseMessage
+
+    if (
+      message.sender !== CURRENT_USER &&
+      message.receiver !== CURRENT_USER
+    ) {
+      return
+    }
+
+    const convertedMessage = convertDatabaseMessage(message)
+
+    setConversations((previous) =>
+      previous.map((conversation) => {
+        const belongsToConversation =
+          (message.sender === CURRENT_USER &&
+            message.receiver === conversation.userId) ||
+          (message.sender === conversation.userId &&
+            message.receiver === CURRENT_USER)
+
+        if (!belongsToConversation) return conversation
+
+        if (
+          conversation.messages.some(
+            (existing) => existing.id === convertedMessage.id,
+          )
+        ) {
+          return conversation
+        }
+
+        return {
+          ...conversation,
+          messages: [
+            ...conversation.messages,
+            convertedMessage,
+          ],
+        }
+      }),
+    )
+
+    console.log('VIGHT live message received:', message)
+  } catch (error) {
+    console.error('Invalid VIGHT message:', error)
+  }
+}
+  socket.onerror = () => {
+    if (websocketRef.current !== socket) return
+
+    console.error('VIGHT WebSocket connection error')
+  }
+
+  socket.onclose = () => {
+    if (websocketRef.current !== socket) return
+
+    console.log('VIGHT WebSocket disconnected')
+    websocketRef.current = null
+    setConnectionStatus('disconnected')
+  }
+
+  return () => {
+    if (websocketRef.current === socket) {
+      websocketRef.current = null
+    }
+
+    socket.close()
+  }
+}, [])
 
   const filteredConversations = conversations.filter((conversation) =>
     conversation.name.toLowerCase().includes(search.toLowerCase()),
   )
+
+useEffect(() => {
+  const controller = new AbortController()
+
+  async function loadMessages() {
+    try {
+      const response = await fetch('/api/messages', {
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to load messages')
+      }
+
+      const messages =
+        (await response.json()) as DatabaseMessage[]
+
+      setConversations((previous) =>
+        previous.map((conversation) => {
+          const conversationMessages = messages
+            .filter(
+              (message) =>
+                (message.sender === CURRENT_USER &&
+                  message.receiver === conversation.userId) ||
+                (message.sender === conversation.userId &&
+                  message.receiver === CURRENT_USER),
+            )
+            .map(convertDatabaseMessage)
+
+          return {
+            ...conversation,
+            messages: conversationMessages,
+          }
+        }),
+      )
+
+      console.log('VIGHT message history loaded')
+    } catch (error) {
+      if (controller.signal.aborted) return
+
+      console.error('Failed to load VIGHT history:', error)
+    }
+  }
+
+  loadMessages()
+
+  return () => controller.abort()
+}, [])
 
   const sendMessage = () => {
     const text = messageInput.trim()
 
     if (!text || !activeConversation) return
 
-    const newMessage: Message = {
-      id: Date.now(),
-      text,
-      sender: 'me',
-      time: new Date().toLocaleTimeString([], {
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
+    const socket = websocketRef.current
+
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      alert('VIGHT is disconnected. Please check the backend server.')
+      return
     }
 
-    setConversations((previous) =>
-      previous.map((conversation) =>
-        conversation.id === activeId
-          ? {
-              ...conversation,
-              messages: [...conversation.messages, newMessage],
-            }
-          : conversation,
-      ),
-    )
+  const message = {
+      sender: CURRENT_USER,
+      receiver: activeConversation.userId,
+      content: text,
+    }
+
+    socket.send(JSON.stringify(message))
 
     setMessageInput('')
   }
@@ -288,7 +429,9 @@ function App() {
           </div>
 
           <div className="topbar-actions">
-            <span className="topbar-status">VIGHT Messenger</span>
+            <span className="topbar-status">
+              VIGHT Messenger - {connectionStatus}
+              </span>
           </div>
         </header>
 
