@@ -1,0 +1,24 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# React / Node.js
+node_modules/
+dist/
+frontend/.vite/
+
+# Rust build artifacts
+target/
+backend/target/
+
+# Local database files
+database/data/
+database/backups/
+
+# Logs
+*.log
+
+# Editor / operating system
+.DS_Store
+.vscode/
