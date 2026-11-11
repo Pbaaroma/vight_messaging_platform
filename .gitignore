@@ -22,3 +22,16 @@ database/backups/
 # Editor / operating system
 .DS_Store
 .vscode/
+# Python virtual environments
+.venv/
+__pycache__/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+target/
+node_modules/
+dist/

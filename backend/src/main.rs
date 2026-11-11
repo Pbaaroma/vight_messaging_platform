@@ -1,3 +1,7 @@
+use tokio::sync::broadcast;
+
+mod websocket;
+
 use axum::{
     extract::State,
     http::StatusCode,
@@ -20,6 +24,7 @@ use std::{env, net::SocketAddr};
 #[derive(Clone)]
 struct AppState {
     database: Database,
+    broadcast_tx: broadcast::Sender<String>,
 }
 
 #[derive(Serialize)]
@@ -151,13 +156,20 @@ async fn main() {
 
     println!("VIGHT connected to MongoDB successfully!");
 
+    let(broadcast_tx, _) = broadcast::channel::<String>(100);
+
     let state = AppState {
         database: client.database(&database_name),
+        broadcast_tx,
     };
 
     let app = Router::new()
     .route("/api/health", get(health_check))
     .route("/api/messages", get(get_messages).post(send_message))
+    .route(
+        "/ws",
+        get(websocket::handler::websocket_handler),
+    )
     .with_state(state);
 
     let address = SocketAddr::from(([127, 0, 0, 1], 8000));
