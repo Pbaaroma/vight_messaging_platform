@@ -1,6 +1,8 @@
 use tokio::sync::broadcast;
 
 mod websocket;
+mod auth;
+mod session;
 
 use axum::{
     extract::State,
@@ -14,8 +16,10 @@ use futures_util::TryStreamExt;
 
 use mongodb::{
     bson::{doc, Document},
+    options::IndexOptions,
     Client,
     Database,
+    IndexModel,
 };
 
 use serde::Serialize;
@@ -156,21 +160,60 @@ async fn main() {
 
     println!("VIGHT connected to MongoDB successfully!");
 
-    let(broadcast_tx, _) = broadcast::channel::<String>(100);
+    let database = client.database(&database_name);
+
+let users = database.collection::<Document>("users");
+
+let email_index = IndexModel::builder()
+    .keys(doc! { "email": 1 })
+    .options(
+        IndexOptions::builder()
+            .unique(true)
+            .build(),
+    )
+    .build();
+
+users
+    .create_index(email_index)
+    .await
+    .expect("Failed to create unique email index");
+
+println!("VIGHT unique email index verified!");
+
+    let (broadcast_tx, _) = broadcast::channel::<String>(100);
 
     let state = AppState {
-        database: client.database(&database_name),
+        database,
         broadcast_tx,
     };
 
     let app = Router::new()
-    .route("/api/health", get(health_check))
-    .route("/api/messages", get(get_messages).post(send_message))
-    .route(
-        "/ws/{user_id}",
-        get(websocket::handler::websocket_handler),
-    )
-    .with_state(state);
+        .route("/api/health", get(health_check))
+        .route("/api/messages", get(get_messages).post(send_message))
+        .route(
+            "/api/auth/register",
+            axum::routing::post(auth::handler::register),
+        )
+.route(
+    "/api/auth/login",
+    axum::routing::post(auth::handler::login),
+)
+
+.route(
+    "/api/auth/me",
+    get(auth::handler::me),
+)
+
+.route(
+    "/api/auth/logout",
+    axum::routing::post(auth::handler::logout),
+)
+
+        .route(
+            "/ws/{user_id}",
+            get(websocket::handler::websocket_handler),
+        )
+        .with_state(state);
 
     let address = SocketAddr::from(([127, 0, 0, 1], 8000));
 
