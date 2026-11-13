@@ -144,7 +144,7 @@ useEffect(() => {
     window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 
   const socket = new WebSocket(
-    `${protocol}//${window.location.host}/ws`,
+    `${protocol}//${window.location.host}/ws/client_a`,
   )
 
   websocketRef.current = socket
@@ -292,7 +292,6 @@ useEffect(() => {
     }
 
   const message = {
-      sender: CURRENT_USER,
       receiver: activeConversation.userId,
       content: text,
     }

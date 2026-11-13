@@ -167,7 +167,7 @@ async fn main() {
     .route("/api/health", get(health_check))
     .route("/api/messages", get(get_messages).post(send_message))
     .route(
-        "/ws",
+        "/ws/{user_id}",
         get(websocket::handler::websocket_handler),
     )
     .with_state(state);
