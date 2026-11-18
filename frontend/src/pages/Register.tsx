@@ -19,26 +19,63 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  function handleRegister(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
 
-    if (password.length < 8) {
-      setError('Password must contain at least 8 characters.')
-      return
-    }
+  async function handleRegister(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
+  setError('')
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.')
-      return
-    }
-
-    // Demo navigation only. No account is created or stored.
-    if (username.trim() && email.trim()) {
-      navigate('/dashboard')
-    }
+  if (password.length < 12) {
+    setError('Password must contain at least 12 characters.')
+    return
   }
+
+  if (password !== confirmPassword) {
+    setError('Passwords do not match.')
+    return
+  }
+
+  setLoading(true)
+
+  try {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        name: username.trim(),
+        email: email.trim(),
+        password,
+      }),
+    })
+
+    if (!response.ok) {
+      if (response.status === 409) {
+        throw new Error('An account with this email already exists.')
+      }
+
+      if (response.status === 400) {
+        throw new Error('Please check your account information.')
+      }
+
+      throw new Error('Registration failed. Please try again.')
+    }
+
+    // Registration creates the account, but does not log the user in.
+    navigate('/login', { replace: true })
+  } catch (error) {
+    setError(
+      error instanceof Error
+        ? error.message
+        : 'Something went wrong. Please try again.'
+    )
+  } finally {
+    setLoading(false)
+  }
+}
 
   return (
     <main className="auth-page">
@@ -130,18 +167,20 @@ export default function Register() {
 
           {error && <p className="auth-error" role="alert">{error}</p>}
 
-          <button className="auth-submit" type="submit">
-            Create Account <ArrowRight size={19} />
-          </button>
+          <button
+  className="auth-submit"
+  type="submit"
+  disabled={loading}
+>
+  {loading ? 'Creating Account...' : 'Create Account'}
+  {!loading && <ArrowRight size={19} />}
+</button>
         </form>
 
         <p className="auth-switch">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
 
-        <p className="auth-demo-note">
-          Demo interface — accounts are not saved yet.
-        </p>
       </section>
     </main>
   )

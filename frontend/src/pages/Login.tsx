@@ -9,15 +9,56 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+async function handleLogin(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault()
 
-    // Demo navigation only. No authentication is performed yet.
-    if (!email.trim() || !password) return
+  setError('')
+  setLoading(true)
 
-    navigate('/dashboard')
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        email: email.trim(),
+        password,
+      }),
+    })
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Invalid email or password.')
+      }
+
+      throw new Error('Unable to log in. Please try again.')
+    }
+
+    // Confirm that the server recognizes the new session.
+    const sessionResponse = await fetch('/api/auth/me', {
+      credentials: 'include',
+    })
+
+    if (!sessionResponse.ok) {
+      throw new Error('Login succeeded, but session verification failed.')
+    }
+
+    navigate('/dashboard', { replace: true })
+  } catch (error) {
+    setError(
+      error instanceof Error
+        ? error.message
+        : 'Something went wrong. Please try again.'
+    )
+  } finally {
+    setLoading(false)
   }
+}
 
   return (
     <main className="auth-page">
@@ -78,9 +119,20 @@ export default function Login() {
             </button>
           </div>
 
-          <button className="auth-submit" type="submit">
-            Sign In <ArrowRight size={19} />
-          </button>
+        {error && (
+  <p className="auth-error" role="alert">
+    {error}
+  </p>
+)}
+
+<button
+  className="auth-submit"
+  type="submit"
+  disabled={loading}
+>
+  {loading ? 'Signing In...' : 'Sign In'}
+  {!loading && <ArrowRight size={19} />}
+</button>
         </form>
 
         <div className="auth-divider">

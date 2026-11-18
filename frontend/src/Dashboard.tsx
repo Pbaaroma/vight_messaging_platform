@@ -15,6 +15,7 @@ import {
   Phone,
   Video,
   Info,
+  LogOut,
 } from 'lucide-react'
 import './App.css'
 
@@ -136,6 +137,37 @@ const [connectionStatus, setConnectionStatus] =
   useState<'connecting' | 'connected' | 'disconnected'>('connecting')
 
   const navigate = useNavigate()
+
+  const [loggingOut, setLoggingOut] = useState(false)
+
+async function handleLogout() {
+  if (loggingOut) return
+
+  setLoggingOut(true)
+
+  try {
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+
+    if (!response.ok) {
+      throw new Error('Logout failed')
+    }
+
+    websocketRef.current?.close()
+    websocketRef.current = null
+
+    navigate('/login', { replace: true })
+  } catch (error) {
+    console.error('VIGHT logout error:', error)
+    alert('Unable to log out. Please try again.')
+  } finally {
+    setLoggingOut(false)
+  }
+}
+
+
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeId,
   )
@@ -144,7 +176,7 @@ useEffect(() => {
     window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 
   const socket = new WebSocket(
-    `${protocol}//${window.location.host}/ws/client_a`,
+    `${protocol}//${window.location.host}/ws`,
   )
 
   websocketRef.current = socket
@@ -338,6 +370,17 @@ useEffect(() => {
             <Settings size={20} />
             <span>Settings</span>
           </button>
+
+          <button
+  className="nav-item"
+  type="button"
+  onClick={handleLogout}
+  disabled={loggingOut}
+>
+  <LogOut size={20} />
+  <span>{loggingOut ? 'Logging Out...' : 'Logout'}</span>
+</button>
+
         </nav>
 
         <button

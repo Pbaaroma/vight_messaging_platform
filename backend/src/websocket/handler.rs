@@ -1,16 +1,22 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, State,
+        State,
     },
+    http::StatusCode,
     response::Response,
 };
+
+use axum_extra::extract::cookie::CookieJar;
 
 use futures_util::{SinkExt, StreamExt};
 use mongodb::bson::{doc, DateTime, Document};
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
+use crate::{
+    auth::session_user::authenticated_user,
+    AppState,
+};
 
 #[derive(Debug, Deserialize)]
 struct IncomingMessage {
@@ -28,10 +34,16 @@ struct OutgoingMessage {
 
 pub async fn websocket_handler(
     ws: WebSocketUpgrade,
-    Path(user_id): Path<String>,
     State(state): State<AppState>,
-) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, state, user_id))
+    jar: CookieJar,
+) -> Result<Response, (StatusCode, String)> {
+    let user_id = authenticated_user(&state.database, &jar).await?;
+
+    println!("VIGHT: Authenticated WebSocket user connected.");
+
+    Ok(ws.on_upgrade(move |socket| {
+        handle_socket(socket, state, user_id)
+    }))
 }
 
 async fn handle_socket(
@@ -58,6 +70,7 @@ async fn handle_socket(
                 Err(_) => break,
             };
 
+             
             let outgoing =
                 match serde_json::from_str::<OutgoingMessage>(&json) {
                     Ok(message) => message,

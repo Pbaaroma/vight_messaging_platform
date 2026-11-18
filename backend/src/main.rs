@@ -15,12 +15,15 @@ use axum::{
 use futures_util::TryStreamExt;
 
 use mongodb::{
-    bson::{doc, Document},
+    bson::{doc, oid::ObjectId, Document},
     options::IndexOptions,
     Client,
     Database,
     IndexModel,
 };
+
+use axum_extra::extract::cookie::CookieJar;
+use auth::session_user::authenticated_user;
 
 use serde::Serialize;
 use std::{env, net::SocketAddr};
@@ -37,6 +40,12 @@ struct HealthResponse {
     service: &'static str,
 }
 
+#[derive(Serialize)]
+struct ContactUser {
+    user_id: String,
+    name: String,
+}
+
 // Existing health endpoint
 async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
@@ -47,7 +56,6 @@ async fn health_check() -> Json<HealthResponse> {
 
 #[derive(serde::Deserialize)]
 struct NewMessage {
-    sender: String,
     receiver: String,
     content: String,
 }
@@ -55,11 +63,19 @@ struct NewMessage {
 // New MongoDB message history endpoint
 async fn get_messages(
     State(state): State<AppState>,
+    jar: CookieJar,
 ) -> Result<Json<Vec<Document>>, (StatusCode, String)> {
+
+    let user_id =authenticated_user(&state.database, &jar).await?;
     let collection = state.database.collection::<Document>("messages");
 
     let cursor = collection
-        .find(doc! {})
+        .find(doc! {
+    "$or": [
+        { "sender": &user_id },
+        { "receiver": &user_id }
+    ]
+})
         .await
         .map_err(|error| {
             eprintln!("MongoDB query failed: {error}");
@@ -83,15 +99,77 @@ async fn get_messages(
     Ok(Json(messages))
 }
 
+async fn get_users(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<ContactUser>>, (StatusCode, String)> {
+    let current_user =
+        authenticated_user(&state.database, &jar).await?;
+
+    let current_object_id =
+        ObjectId::parse_str(&current_user).map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid authenticated user".to_string(),
+            )
+        })?;
+
+    let users_collection =
+        state.database.collection::<Document>("users");
+
+    let cursor = users_collection
+        .find(doc! {
+            "_id": { "$ne": current_object_id }
+        })
+        .await
+        .map_err(|error| {
+            eprintln!("Failed to retrieve users: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to retrieve users".to_string(),
+            )
+        })?;
+
+    let documents: Vec<Document> = cursor
+        .try_collect()
+        .await
+        .map_err(|error| {
+            eprintln!("Failed to read users: {error}");
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read users".to_string(),
+            )
+        })?;
+
+    let contacts = documents
+        .into_iter()
+        .filter_map(|document| {
+            let id = document.get_object_id("_id").ok()?;
+            let name = document.get_str("name").ok()?;
+
+            Some(ContactUser {
+                user_id: id.to_hex(),
+                name: name.to_string(),
+            })
+        })
+        .collect();
+
+    Ok(Json(contacts))
+}
+
+
 async fn send_message(
     State(state): State<AppState>,
+    jar: CookieJar,
     Json(message): Json<NewMessage>,
 ) -> Result<(StatusCode, Json<Document>), (StatusCode, String)> {
-    let sender = message.sender.trim();
+    let sender = authenticated_user(&state.database, &jar).await?;
     let receiver = message.receiver.trim();
     let content = message.content.trim();
 
-    if sender.is_empty() || receiver.is_empty() || content.is_empty() {
+    if receiver.is_empty() || content.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             "Sender, receiver, and content cannot be empty".to_string(),
@@ -108,7 +186,7 @@ async fn send_message(
     let collection = state.database.collection::<Document>("messages");
 
     let new_message = doc! {
-        "sender": sender,
+        "sender": &sender,
         "receiver": receiver,
         "content": content,
         "createdAt": mongodb::bson::DateTime::now(),
@@ -189,6 +267,7 @@ println!("VIGHT unique email index verified!");
 
     let app = Router::new()
         .route("/api/health", get(health_check))
+        .route("/api/users", get(get_users))
         .route("/api/messages", get(get_messages).post(send_message))
         .route(
             "/api/auth/register",
@@ -210,7 +289,7 @@ println!("VIGHT unique email index verified!");
 )
 
         .route(
-            "/ws/{user_id}",
+            "/ws",
             get(websocket::handler::websocket_handler),
         )
         .with_state(state);
