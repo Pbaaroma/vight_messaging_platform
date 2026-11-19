@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import {
   MessageCircle,
@@ -41,6 +41,17 @@ type DatabaseMessage = {
   status?: string
 }
 
+type AuthenticatedUser = {
+  user_id: string
+  name: string
+  email: string
+}
+
+type ContactUser = {
+  user_id: string
+  name: string
+}
+
 type Conversation = {
   id: number
   userId: string
@@ -51,46 +62,6 @@ type Conversation = {
   messages: Message[]
 }
 
-const initialConversations: Conversation[] = [
-  {
-    id: 1,
-    userId: 'client_b',
-    name: 'Jonathan Mensah',
-    initials: 'JM',
-    color: '#2563eb',
-    online: true,
-    messages: [  ],
-  },
-  {
-    id: 2,
-    userId: 'client_c',
-    name: 'Emmanuel Mensah',
-    initials: 'EM',
-    color: '#7c3aed',
-    online: true,
-    messages: [],
-  },
-  {
-    userId: 'client_d',
-    id: 3,
-    name: 'Gabriel Kofi',
-    initials: 'GK',
-    color: '#0891b2',
-    online: true,
-    messages: [],
-  },
-  {
-    userId: 'client_e',
-    id: 4,
-    name: 'Lawrence Annor',
-    initials: 'LA',
-    color: '#ea580c',
-    online: false,
-    messages: [],
-  },
-]
-
-const CURRENT_USER = 'client_a'
 
 function formatMessageTime(timestamp?: string) {
   if (!timestamp) return ''
@@ -107,6 +78,7 @@ function formatMessageTime(timestamp?: string) {
 
 function convertDatabaseMessage(
   message: DatabaseMessage,
+  currentUserId: string,
 ): Message {
   const mongoTimestamp =
     message.createdAt?.$date?.$numberLong
@@ -118,7 +90,7 @@ function convertDatabaseMessage(
   return {
     id: message._id?.$oid ?? crypto.randomUUID(),
     text: message.content,
-    sender: message.sender === CURRENT_USER ? 'me' : 'other',
+    sender: message.sender === currentUserId ? 'me' : 'other',
     time: formatMessageTime(timestamp),
   }
 }
@@ -126,9 +98,14 @@ function convertDatabaseMessage(
 
 function App() {
   const [conversations, setConversations] =
-    useState<Conversation[]>(initialConversations)
+    useState<Conversation[]>([])
 
-  const [activeId, setActiveId] = useState(1)
+const [activeId, setActiveId] = useState<number | null>(null)
+
+const [currentUser, setCurrentUser] =
+  useState<AuthenticatedUser | null>(null)
+
+const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [messageInput, setMessageInput] = useState('')
   const websocketRef = useRef<WebSocket | null>(null)
@@ -139,6 +116,69 @@ const [connectionStatus, setConnectionStatus] =
   const navigate = useNavigate()
 
   const [loggingOut, setLoggingOut] = useState(false)
+useEffect(() => {
+  const controller = new AbortController()
+
+  async function loadDashboardUsers() {
+    try {
+      const [meResponse, usersResponse] = await Promise.all([
+        fetch('/api/auth/me', {
+          credentials: 'include',
+          signal: controller.signal,
+        }),
+        fetch('/api/users', {
+          credentials: 'include',
+          signal: controller.signal,
+        }),
+      ])
+
+      if (!meResponse.ok || !usersResponse.ok) {
+        throw new Error('Unable to load VIGHT users')
+      }
+
+      const me = (await meResponse.json()) as AuthenticatedUser
+      const users = (await usersResponse.json()) as ContactUser[]
+
+      if (controller.signal.aborted) return
+
+      setCurrentUser(me)
+
+      const realConversations: Conversation[] = users.map(
+        (user, index) => ({
+          id: index + 1,
+          userId: user.user_id,
+          name: user.name,
+          initials: user.name
+            .split(' ')
+            .map((part) => part[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase(),
+          color: ['#2563eb', '#7c3aed', '#0891b2', '#ea580c'][
+            index % 4
+          ],
+          online: false,
+          messages: [],
+        }),
+      )
+
+      setConversations(realConversations)
+     setActiveId(realConversations[0]?.id ?? null)
+
+      console.log('VIGHT registered users loaded')
+    } catch (error) {
+      if (controller.signal.aborted) return
+
+      console.error('VIGHT dashboard loading error:', error)
+    }
+  }
+
+  loadDashboardUsers()
+
+  return () => controller.abort()
+}, [])
+
+
 
 async function handleLogout() {
   if (loggingOut) return
@@ -168,10 +208,19 @@ async function handleLogout() {
 }
 
 
-  const activeConversation = conversations.find(
+  const requestedContact = searchParams.get('contact')
+
+const activeConversation =
+  conversations.find(
+    (conversation) => conversation.userId === requestedContact,
+  ) ??
+  conversations.find(
     (conversation) => conversation.id === activeId,
   )
+
 useEffect(() => {
+  if (!currentUser) return
+  
   const protocol =
     window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 
@@ -195,21 +244,23 @@ useEffect(() => {
     const message = JSON.parse(event.data) as DatabaseMessage
 
     if (
-      message.sender !== CURRENT_USER &&
-      message.receiver !== CURRENT_USER
+      message.sender !== currentUser?.user_id &&
+      message.receiver !== currentUser?.user_id
     ) {
       return
     }
 
-    const convertedMessage = convertDatabaseMessage(message)
-
+   const convertedMessage = convertDatabaseMessage(
+  message,
+  currentUser.user_id,
+)
     setConversations((previous) =>
       previous.map((conversation) => {
         const belongsToConversation =
-          (message.sender === CURRENT_USER &&
+          (message.sender === currentUser.user_id &&
             message.receiver === conversation.userId) ||
           (message.sender === conversation.userId &&
-            message.receiver === CURRENT_USER)
+            message.receiver === currentUser.user_id)
 
         if (!belongsToConversation) return conversation
 
@@ -240,6 +291,7 @@ useEffect(() => {
     if (websocketRef.current !== socket) return
 
     console.error('VIGHT WebSocket connection error')
+    setConnectionStatus('disconnected')
   }
 
   socket.onclose = () => {
@@ -257,18 +309,22 @@ useEffect(() => {
 
     socket.close()
   }
-}, [])
+}, [currentUser])
 
   const filteredConversations = conversations.filter((conversation) =>
     conversation.name.toLowerCase().includes(search.toLowerCase()),
   )
 
 useEffect(() => {
+  if (!currentUser) return
+
+  const currentUserId = currentUser.user_id
   const controller = new AbortController()
 
   async function loadMessages() {
     try {
       const response = await fetch('/api/messages', {
+        credentials: 'include',
         signal: controller.signal,
       })
 
@@ -284,13 +340,14 @@ useEffect(() => {
           const conversationMessages = messages
             .filter(
               (message) =>
-                (message.sender === CURRENT_USER &&
+                (message.sender === currentUserId &&
                   message.receiver === conversation.userId) ||
                 (message.sender === conversation.userId &&
-                  message.receiver === CURRENT_USER),
+                  message.receiver === currentUserId),
             )
-            .map(convertDatabaseMessage)
-
+            .map((message) =>
+    convertDatabaseMessage(message, currentUserId),
+          )
           return {
             ...conversation,
             messages: conversationMessages,
@@ -309,7 +366,7 @@ useEffect(() => {
   loadMessages()
 
   return () => controller.abort()
-}, [])
+}, [currentUser])
 
   const sendMessage = () => {
     const text = messageInput.trim()
@@ -415,9 +472,12 @@ useEffect(() => {
                   key={conversation.id}
                   type="button"
                   className={`conversation-item ${
-                    activeId === conversation.id ? 'selected' : ''
+                    activeConversation?.id === conversation.id ? 'selected' : ''
                   }`}
-                  onClick={() => setActiveId(conversation.id)}
+                  onClick={() => {
+  setActiveId(conversation.id)
+  navigate('/dashboard', { replace: true })
+}}
                 >
                   <div
                     className="avatar"
