@@ -1,0 +1,75 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: vight-mongodb
+    restart: unless-stopped
+    env_file:
+      - ./database/.env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: vight_db
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - vight_mongo_data:/data/db
+    networks:
+      vight-db-net:
+        ipv4_address: 172.25.30.2
+
+  api:
+    image: vight-backend:latest
+    build:
+      context: ./backend
+    container_name: vight-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.docker
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks:
+      vight-api-net:
+        ipv4_address: 172.25.20.2
+      vight-db-net:
+        ipv4_address: 172.25.30.3
+    depends_on:
+      - mongodb
+
+  router:
+    image: vight-router:latest
+    build:
+      context: ./network/router
+    container_name: vight-router
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      net.ipv4.ip_forward: "1"
+    command: ["sleep", "infinity"]
+    networks:
+      vight-client-net:
+        ipv4_address: 172.25.10.3
+      vight-api-net:
+        ipv4_address: 172.25.20.3
+
+  client:
+    image: alpine:3.20
+    container_name: vight-client-test
+    restart: unless-stopped
+    command: ["sleep", "infinity"]
+    networks:
+      vight-client-net:
+        ipv4_address: 172.25.10.2
+
+volumes:
+  vight_mongo_data:
+    external: true
+    name: database_vight_mongo_data
+
+networks:
+  vight-client-net:
+    external: true
+  vight-api-net:
+    external: true
+  vight-db-net:
+    external: true

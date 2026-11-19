@@ -294,7 +294,7 @@ println!("VIGHT unique email index verified!");
         )
         .with_state(state);
 
-    let address = SocketAddr::from(([127, 0, 0, 1], 8000));
+    let address = SocketAddr::from(([0, 0, 0, 0], 8000));
 
     let listener = tokio::net::TcpListener::bind(address)
         .await
