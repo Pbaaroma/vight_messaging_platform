@@ -12,9 +12,26 @@ frontend/.vite/
 target/
 backend/target/
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+
 # Local database files
 database/data/
 database/backups/
+backups/
+
+# TLS certificates and private keys
+security/tls/*.key
+security/tls/*.crt
+
+
+# Generated Nginx frontend files
+security/nginx/frontend-dist/
+
+# Temporary configuration backups
+*.backup
 
 # Logs
 *.log
@@ -22,17 +39,3 @@ database/backups/
 # Editor / operating system
 .DS_Store
 .vscode/
-# Python virtual environments
-.venv/
-__pycache__/
-
-# Environment variables and secrets
-.env
-.env.*
-!.env.example
-
-# Build artifacts
-target/
-node_modules/
-dist/
-backups/

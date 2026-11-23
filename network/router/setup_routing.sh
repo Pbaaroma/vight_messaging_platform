@@ -10,7 +10,7 @@ docker run --rm \
   --network container:vight-client-test \
   --cap-add NET_ADMIN \
   nicolaka/netshoot \
-  ip route replace 172.25.20.0/24 via 172.25.10.3
+  ip route replace 172.25.20.0/24 via 172.25.10.2
 
 # API -> Client network through router.
 docker run --rm \

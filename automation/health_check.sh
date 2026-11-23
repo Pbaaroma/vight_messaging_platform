@@ -25,6 +25,8 @@ check_container vight-mongodb
 check_container vight-api
 check_container vight-router
 check_container vight-client-test
+check_container vight-nginx
+
 
 echo ""
 echo "Checking MongoDB..."
@@ -52,6 +54,20 @@ fi
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then
+
+echo ""
+echo "Checking HTTPS frontend..."
+
+if curl --insecure --silent --max-time 5 \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    https://127.0.0.1:8443/ | grep -qx '200'; then
+    echo "[PASS] VIGHT HTTPS frontend is responding"
+else
+    echo "[FAIL] VIGHT HTTPS frontend is not responding"
+    FAILED=1
+fi
+
     echo "VIGHT HEALTH CHECK: PASSED"
 else
     echo "VIGHT HEALTH CHECK: FAILED"
